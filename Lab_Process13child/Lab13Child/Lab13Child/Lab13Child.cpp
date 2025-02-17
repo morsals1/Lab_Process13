@@ -2,7 +2,7 @@
 #include <iostream>
 #include <conio.h>
 #include <vector>
-
+#include <ctime>
 
 DWORD WINAPI ThreadFunc(LPVOID param) {
     int id = (int)(uintptr_t)param;
@@ -13,74 +13,60 @@ DWORD WINAPI ThreadFunc(LPVOID param) {
     while (true) {
         int randomNumber = rand();
         std::cout << "Поток " << id << " сгенерировал число: " << randomNumber << "\n";
-
         Sleep(1000);
     }
 
-    std::cout << "Поток " << id << " завершил выполнение.\n";
     return 0;
 }
 
 int main() {
-    setlocale(LC_ALL, "Rus");
+
+    const wchar_t* pipeName = L"\\\\.\\pipe\\MyPipe";
+
+    HANDLE hPipe = CreateFile(pipeName,GENERIC_READ | GENERIC_WRITE,0,NULL,OPEN_EXISTING,0,NULL);
+
+    if (hPipe == INVALID_HANDLE_VALUE) {
+        std::cerr << "Ошибка подключения к каналу: " << GetLastError() << std::endl;
+        return 1;
+    }
+
+    std::cout << "Подключение к каналу установлено.\n";
 
     std::vector<HANDLE> threads;
     int nextThreadId = 1;
 
     while (true) {
-        std::cout << "1. Создать новый поток\n";
-        std::cout << "2. Завершить поток\n";
-        std::cout << "3. Выйти\n";
-        std::cout << "Выберите действие: ";
+        wchar_t command[100];
+        DWORD bytesRead;
 
-        int choice;
-        std::cin >> choice;
+        if (ReadFile(hPipe, command, sizeof(command), &bytesRead, NULL)) {
+            if (wcscmp(command, L"1") == 0) {
 
-        if (choice == 1) {
-            HANDLE hThread = CreateThread(NULL, 0, ThreadFunc, (LPVOID)(uintptr_t)nextThreadId++, 0, NULL);
-            if (hThread == NULL) {
-                std::cerr << "Ошибка создания потока\n";
-            }
-            else {
-                threads.push_back(hThread);
-                std::cout << "Поток " << nextThreadId - 1 << " создан.\n";
-            }
-        }
-        else if (choice == 2) {
-            if (threads.empty()) {
-                std::cout << "Нет активных потоков для завершения.\n";
-            }
-            else {
-                std::cout << "Введите ID потока для завершения: ";
-                int id;
-                std::cin >> id;
-
-                if (id > 0 && id <= threads.size()) {
-                    TerminateThread(threads[id - 1], 0);
-                    CloseHandle(threads[id - 1]);
-                    threads.erase(threads.begin() + id - 1);
-                    std::cout << "Поток " << id << " завершен.\n";
+                HANDLE hThread = CreateThread(NULL, 0, ThreadFunc, (LPVOID)(uintptr_t)nextThreadId++, 0, NULL);
+                if (hThread == NULL) {
+                    std::cerr << "Ошибка создания потока\n";
                 }
                 else {
-                    std::cout << "Неверный ID потока.\n";
+                    threads.push_back(hThread);
+                    std::cout << "Поток " << nextThreadId - 1 << " создан.\n";
                 }
             }
-        }
-        else if (choice == 3) {
-            break;
+            else if (wcscmp(command, L"2") == 0) {
+                break;
+            }
         }
         else {
-            std::cout << "Неверный выбор.\n";
+            std::cerr << "Ошибка чтения из канала: " << GetLastError() << std::endl;
+            break;
         }
     }
 
-    for (size_t i = 0; i < threads.size(); ++i) {
-        TerminateThread(threads[i], 0);
-        CloseHandle(threads[i]);
+    for (HANDLE hThread : threads) {
+        TerminateThread(hThread, 0);
+        CloseHandle(hThread);
     }
 
-    std::cout << "Все потоки завершены. Нажмите любую клавишу для выхода.\n";
-    _getch();
-
+    CloseHandle(hPipe);
+    std::cout << "Дочерний процесс завершен.\n";
     return 0;
 }
